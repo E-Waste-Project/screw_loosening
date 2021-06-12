@@ -8,31 +8,23 @@ import tf
 
 
 class Irb120():
-    TOOL_GROUP = "cutting_tool"
-    CAMERA_GROUP = "camera"
-    def __init__(self):
-        self.group = MoveGroupCommander(self.TOOL_GROUP)
-        self.camera = MoveGroupCommander(self.CAMERA_GROUP)
+
+    def __init__(self, group):
+        self.group = MoveGroupCommander(group)
         self.__z_offset = 0.01
         
         self.transformer_listener = tf.TransformListener()
         rospy.Subscriber("/cut_xyz", PoseArray, self.poses_callback)
         self.trans_pub_test = rospy.Publisher("trans_pose_test", PoseArray, queue_size=1)
-        # self.camera.set_pose_reference_frame("base_link")
-        # self.camera.set_pose_target([0.310, 0.046, 0.508, 0.000, 0.707, 0.000, 0.707], end_effector_link="camera_link")
-        # self.camera.go()
-    
-    def go_to_screw(self, screw_location, ref_frame="base_link"):
+
+    def go_to_screw(self, screw_location, quat, ref_frame="base_link"):
         self.group.set_pose_reference_frame(ref_frame) 
         # approach
         set_point = Pose()
         set_point.position.x = screw_location.position.x
         set_point.position.y = screw_location.position.y
         set_point.position.z = screw_location.position.z + self.__z_offset
-        
-        quat_base_link = [0, 1, 0, 0]
-        quat_table_link = [0.707, -0.707, 0.000, -0.000]
-        quat = quat_base_link
+
         set_point.orientation.x = quat[0]
         set_point.orientation.y = quat[1]
         set_point.orientation.z = quat[2]
@@ -41,7 +33,7 @@ class Irb120():
         self.group.clear_pose_targets()
         self.group.set_pose_target(set_point)
         approach_result = self.group.go()
-        return self.group.get_current_pose(end_effector_link="tool0_comp")
+        return self.group.get_current_pose(end_effector_link=self.group.get_end_effector_link())
         
     def __transform_poses(self, target_frame, source_frame, pose_arr):
         print ("here")
@@ -67,10 +59,10 @@ class Irb120():
         # raw_input()
         self.trans_pub_test.publish(trans_poses)
         print ("publish pose array transformed")
-        # raw_input()
-
+        # raw_input()2
+        quat_base_link = [1, 0, 0, 0]
         for i in range(len(trans_poses.poses)):
-            ef_pose = self.go_to_screw(trans_poses.poses[i])
+            ef_pose = self.go_to_screw(trans_poses.poses[i], quat_base_link)
             print("-------------------------")
             print("screw_location", trans_poses.poses[i].position)
             print("tool_pose = ", ef_pose.pose.position)
@@ -81,6 +73,6 @@ class Irb120():
     
 if __name__=="__main__":
     rospy.init_node("loosen_it")
-    Irb120()
+    Irb120("tool_calibration_group")
     rospy.spin()
     
