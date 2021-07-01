@@ -18,7 +18,6 @@ class Calibrate:
                                          queue_size=1)
         self.read_img = read_img
         self.image_topic = "/camera/color/image_raw"
-        self.operation_pub = rospy.Publisher("/operation", String, queue_size=1)
 
     def recieve_img(self):
         if self.read_img:
@@ -26,19 +25,26 @@ class Calibrate:
             self.image = cv.resize(self.image, (1280, 720))
         else:
             # # Wait for rgb camera stream to publish a frame.e
+            print("Waiting for image")
             image_msg = rospy.wait_for_message(self.image_topic, Image)
+            print("Image Received")
             # Convert msg to numpy image.
             self.image = numpify(image_msg)
     
     def detect_corners(self, size=(7, 6)):
+        img = self.image.copy()
+        img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+        cv.imshow('img', img)
+        cv.waitKey(0)
+        cv.destroyAllWindows()
         # termination criteria
         criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
         # Arrays to store object points and image points from all the images.
-        img = self.image.copy()
-        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+        gray = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
         # Find the chess board corners
         ret, corners = cv.findChessboardCorners(gray, size, None)
         # If found, add object points, image points (after refining them)
+        print(ret)
         if ret == True:
             corners2 = cv.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
             # Draw and display the corners
@@ -49,7 +55,9 @@ class Calibrate:
                 # cv.imshow('img', img)
                 # cv.waitKey(0)
                 corner_points.append(tuple(corners2[i][0]))
+            print("corners published")
             self.publish_points(corner_points)
+            rospy.sleep(1)
 
     def publish_points(self, points):
         # Publish Cutting Path.
@@ -58,9 +66,7 @@ class Calibrate:
             path_msg.data.append(y)
             path_msg.data.append(x)
         self.path_publisher.publish(path_msg)
-        rospy.sleep(5)
-        msg = String(data="Cutting")
-        self.operation_pub.publish(msg)
+        rospy.sleep(1)
 
 if __name__ == '__main__':
     rospy.init_node("calibration_test")
