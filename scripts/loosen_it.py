@@ -7,6 +7,8 @@ import tf
 from std_msgs.msg import String
 from abb_robot_msgs.msg import SystemState
 from abb_robot_msgs.srv import SetIOSignal, SetIOSignalRequest
+from cut_contour.robot_helpers import MotionServices
+from copy import deepcopy
 
 
 class loosenIt():
@@ -14,6 +16,7 @@ class loosenIt():
     CAMERA_GROUP = "camera"
 
     def __init__(self):
+        self.milling_ms = MotionServices(self.TOOL_GROUP)
         self.group = MoveGroupCommander(self.TOOL_GROUP)
         self.camera = MoveGroupCommander(self.CAMERA_GROUP)
         self.__depth_of_cut = -0.005
@@ -116,16 +119,26 @@ class loosenIt():
         # cut screw
         print("Press enter to cut")
         # raw_input()
-        change_tool_status(status=1)
-        cut_result = self.move_z_straight(
-            screw_location, dist=self.__depth_of_cut, ref_frame=ref_frame, vel_scale=vel_scale, acc_scale=acc_scale)
+        # self.change_tool_status(status=1)
+        # cut_result = self.move_z_straight(
+        #     screw_location, dist=self.__depth_of_cut, ref_frame=ref_frame, vel_scale=vel_scale, acc_scale=acc_scale)
+        pose_array = PoseArray()
+        pose_array.header.frame_id = "base_link"
+        pose_array.poses.append(deepcopy(screw_location))
+        pose_array.poses[0].position.z -= 0.05
+        # pose_array.poses[0].orientation.x = 0
+        # pose_array.poses[0].orientation.y = 1
+        # pose_array.poses[0].orientation.z = 0
+        # pose_array.poses[0].orientation.w = 0
+        cut_result = self.milling_ms.move_to_touch(poses=pose_array, axis='xy', force_thresh=2,
+                                                   vel_scale=0.05, acc_scale=0.05)
         print("screw cutting = ", cut_result)
 
         # retreat
         retreat_result = self.move_z_straight(
             screw_location, ref_frame=ref_frame, dist=self.retreat_dist)
         print("screw retreat = ", retreat_result)
-        change_tool_status(status=0)
+        # self.change_tool_status(status=0)
 
         final_result = approach_result and cut_result and retreat_result
         return final_result
