@@ -7,7 +7,7 @@ import tf
 from std_msgs.msg import String
 from abb_robot_msgs.msg import SystemState
 from abb_robot_msgs.srv import SetIOSignal, SetIOSignalRequest
-from cut_contour.robot_helpers import MotionServices
+from cut_contour.robot_helpers import MotionServices, TransformServices, generate_spiral
 from copy import deepcopy
 
 
@@ -19,7 +19,7 @@ class loosenIt():
         self.milling_ms = MotionServices(self.TOOL_GROUP)
         self.group = MoveGroupCommander(self.TOOL_GROUP)
         self.camera = MoveGroupCommander(self.CAMERA_GROUP)
-        self.__depth_of_cut = -0.005
+        self.depth_of_cut = -0.0035
         self.approach_dist = 0.02
         self.retreat_dist = 0.02
         self.working_flag = False
@@ -30,13 +30,16 @@ class loosenIt():
         rospy.Subscriber("/screw_xyz", PoseArray, self.poses_callback)
         self.trans_pub_test = rospy.Publisher(
             "trans_pose_test", PoseArray, queue_size=1)
-        self.tool_quat_base_link = [0, 1, 0, 0]
+        self.tool_quat_base_link = [0, 0.707, 0, 0.707]
         self.tool_quat_table_link = [0.707, -0.707, 0.000, -0.000]
         self.cutting_tool = rospy.ServiceProxy(
             "/rws/set_io_signal", SetIOSignal)
+        self.tf_services = TransformServices()
         # self.camera.set_pose_reference_frame("base_link")
         # self.camera.set_pose_target([0.310, 0.046, 0.508, 0.000, 0.707, 0.000, 0.707], end_effector_link="camera_link")
         # self.camera.go()
+        
+        self.screw_offset = 0.01
 
     def states_cb(self, state_msg):
         if state_msg.motors_on == False and self.working_flag == True:
@@ -119,9 +122,7 @@ class loosenIt():
         # cut screw
         print("Press enter to cut")
         # raw_input()
-        # self.change_tool_status(status=1)
-        # cut_result = self.move_z_straight(
-        #     screw_location, dist=self.__depth_of_cut, ref_frame=ref_frame, vel_scale=vel_scale, acc_scale=acc_scale)
+
         pose_array = PoseArray()
         pose_array.header.frame_id = "base_link"
         pose_array.poses.append(deepcopy(screw_location))
@@ -130,8 +131,27 @@ class loosenIt():
         # pose_array.poses[0].orientation.y = 1
         # pose_array.poses[0].orientation.z = 0
         # pose_array.poses[0].orientation.w = 0
-        cut_result = self.milling_ms.move_to_touch(poses=pose_array, axis='xy', force_thresh=2,
+        cut_result = self.milling_ms.move_to_touch(poses=pose_array, axis='x', force_thresh=2,
                                                    vel_scale=0.05, acc_scale=0.05)
+        
+        screw_pose_touched = self.tf_services.lookup_transform('base_link', 'milling_tool')
+        screw_pose_touched.position.z += self.screw_offset
+        rospy.sleep(1)
+        
+        screw_pose_touched_list = PoseArray()
+        screw_pose_touched_list.poses.append(screw_pose_touched)
+        
+        self.milling_ms.move_straight(screw_pose_touched_list)
+        rospy.sleep(1)
+        
+        self.milling_ms.change_tool_status('CuttingTool', status = 1)
+        
+        screw_pose_touched_list.poses[0].position.z -= (self.depth_of_cut + self.screw_offset)
+        
+        spiral_array = generate_spiral(0.005, 0.005, screw_pose_touched_list.poses[0], ref_frame = 'base_link')
+        
+        self.milling_ms.move_straight(spiral_array)        
+        
         print("screw cutting = ", cut_result)
 
         # retreat
@@ -139,6 +159,10 @@ class loosenIt():
             screw_location, ref_frame=ref_frame, dist=self.retreat_dist)
         print("screw retreat = ", retreat_result)
         # self.change_tool_status(status=0)
+        
+        # self.change_tool_status(status=1)
+        # cut_result = self.move_z_straight(
+        # screw_location, dist=self.__depth_of_cut, ref_frame=ref_frame, vel_scale=vel_scale, acc_scale=acc_scale)
 
         final_result = approach_result and cut_result and retreat_result
         return final_result
@@ -176,6 +200,10 @@ class loosenIt():
         return new_plan
 
     def poses_callback(self, pose_arr_msg):
+        self.milling_ms.change_tool_status('Clamp_Off', status = 0)
+        rospy.sleep(1)
+        self.milling_ms.change_tool_status('Clamp_On', status = 1)
+        rospy.sleep(1)
         self.working_flag = True
         trans_poses = self.__transform_poses(
             "base_link", "calibrated_frame", pose_arr_msg)
